@@ -3,14 +3,11 @@
 #PD_DIR = /Applications/Pd.app/Contents/Resources
 #GEM_DIR = /Users/matthias/Gem
 
-PD_DIR = /usr/include/pd
-GEM_DIR = /usr/include/Gem
-
-LIBFREENECT_DIR =  /usr/include
+#LIBFREENECT_DIR =  /usr/include
 
 # build flags
 
-INCLUDES =  -I$(PD_DIR)/src -I.  -I$(GEM_DIR) -I$(PD_DIR)/src
+INCLUDES = 
 CPPFLAGS  = -fPIC -DPD -O2 -funroll-loops -fomit-frame-pointer  -ffast-math \
     -Wall -W -Wno-unused -Wno-parentheses -Wno-switch \
      -g
@@ -19,8 +16,8 @@ CPPFLAGS  = -fPIC -DPD -O2 -funroll-loops -fomit-frame-pointer  -ffast-math \
 UNAME := $(shell uname -s)
 ifeq ($(UNAME),Linux)
  CPPFLAGS += -DLINUX
- INCLUDES += `pkg-config --cflags libfreenect`
- LDFLAGS =  -export_dynamic -shared
+ INCLUDES += `pkg-config --cflags libfreenect` `pkg-config --cflags pd` `pkg-config --cflags Gem`
+ LDFLAGS =  -shared -rdynamic
  LIBS = `pkg-config --libs libfreenect`
  EXTENSION = pd_linux
 endif
