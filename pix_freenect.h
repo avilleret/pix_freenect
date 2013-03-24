@@ -16,6 +16,7 @@ LOG
 // -----------------------
 //	pix_freenect
 //	2011 by Matthias Kronlachner
+//  2013 by Antoine Villeret : add initialisation routines to avoid bogus object under Linux
 // -----------------------
 
 #ifndef INCLUDE_pix_freenect_H_
@@ -46,6 +47,10 @@ LOG
 
 #include <pthread.h>
 
+typedef struct _kinect_device {
+    int id;
+    std::string serial;
+} kinect_device;
 
 /*-----------------------------------------------------------------
 -------------------------------------------------------------------
@@ -68,75 +73,79 @@ class GEM_EXTERN pix_freenect : public GemBase
 	    //////////
 	    // Constructor
     	//pix_freenect(t_float kinect_device_id, t_float rgb_on, t_float depth_on, t_float audio_on);
-    	pix_freenect(int argc, t_atom *argv);
+            pix_freenect(int argc, t_atom *argv);
 		
     protected:
     	
     	//////////
     	// Destructor
-    	virtual ~pix_freenect();
+            virtual ~pix_freenect();
 
 			virtual void	startRendering();
     	//////////
     	// Rendering 	
 			virtual void 	render(GemState *state);
 			
-			virtual void 	postrender(GemState *state);
+            virtual void 	postrender(GemState *state);
 		
-		  // Stop Transfer
-			virtual void	stopRendering();
+        // Stop Transfer
+            virtual void	stopRendering();
     	
-	//////////
+        //////////
     	// Settings/Info
-			void				floatResolutionMess(float resolution);
-    	void				floatVideoModeMess(float videomode);
-			void				floatDepthModeMess(float depthmode);
-    	void	    	floatAngleMess(float angle);
-    	void	    	floatLedMess(float led);
-    	void	    	bangMess();
-			void	    	infoMess();
-    	void	    	accelMess();
-			void				renderDepth(int argc, t_atom*argv);
-			void				audioOutput();
-			bool 				startRGB();
-			bool 				stopRGB();
-			bool 				startDepth();
-			bool 				stopDepth();
+            void			floatResolutionMess(float resolution);
+            void			floatVideoModeMess(float videomode);
+            void			floatDepthModeMess(float depthmode);
+            void	    	floatAngleMess(float angle);
+            void	    	floatLedMess(float led);
+            void	    	bangMess();
+            void	    	infoMess();
+            void	    	accelMess();
+            
+            void            enumerateMess(void);
+            int             openBySerial(t_symbol* serial);
+            int             openById(int id);
+            int             startStream();
+
+			void			renderDepth(int argc, t_atom*argv);
+			void			audioOutput();
+			bool 			startRGB();
+			bool 			stopRGB();
+			bool 			startDepth();
+			bool 			stopDepth();
 			
 			static void* freenect_thread_func(void*);
 			static void depth_cb(freenect_device *dev, void *v_depth, uint32_t timestamp);
 			static void rgb_cb(freenect_device *dev, void *rgb, uint32_t timestamp);
 		
-		  static void in_callback(freenect_device* dev, int num_samples,
-                 int32_t* mic1, int32_t* mic2,
-                 int32_t* mic3, int32_t* mic4,
-                 int16_t* cancelled, void *unknown);
+            static void in_callback(freenect_device* dev, int num_samples,
+            int32_t* mic1, int32_t* mic2,
+            int32_t* mic3, int32_t* mic4,
+            int16_t* cancelled, void *unknown);
                  
     	// Settings
-      int x_angle;
-      int x_led;
-      
-      bool rgb_started;
-      bool depth_started;
-      
-      bool rgb_wanted;
-      bool depth_wanted;
+            int x_angle;
+            int x_led;
+            
+            bool rgb_started;
+            bool depth_started;
+              
+            bool rgb_wanted;
+            bool depth_wanted;
       
 			int got_rgb;
 			int got_depth;
 
 			bool destroy_thread; // shutdown...
 			        
-      uint16_t t_gamma[10000];
-			uint16_t t_gamma2[10000];
+            uint16_t t_gamma[10000];
+            uint16_t t_gamma2[10000];
       
-      uint16_t *depth_mid,  *depth_front;
+            uint16_t *depth_mid,  *depth_front;
 			uint8_t *rgb_back, *rgb_mid, *rgb_front;
 
-			pthread_cond_t  *gl_frame_cond;
-			pthread_mutex_t *gl_backbuf_mutex;
 
-      int kinect_dev_nr;
+            int kinect_dev_nr;
       	
 			freenect_context *f_ctx;
 			freenect_device *f_dev;	
@@ -161,39 +170,44 @@ class GEM_EXTERN pix_freenect : public GemBase
 			bool      m_rendering; // "true" when rendering is on, false otherwise
   		
 			bool  rgb_reallocate; // reallocate memory after rgb resolution changed
-    	//////////
-    	// The pixBlock with the current image
-    	pixBlock    	m_image;
-    	pixBlock    	m_depth;
     	
-    	GemState					*depth_state;
+        //////////
+    	// The pixBlock with the current image
+            pixBlock    	m_image;
+            pixBlock    	m_depth;
+    	
+            GemState					*depth_state;
 
 			
     private:
     
     	//////////
     	// Static member functions
-			static void			floatResolutionMessCallback(void *data, float resolution);
-    	static void			floatVideoModeMessCallback(void *data, float videomode);
-			static void			floatDepthModeMessCallback(void *data, float depthmode);
-    	static void    	floatAngleMessCallback(void *data, float angle);
-    	static void    	floatLedMessCallback(void *data, float led);
-    	static void    	bangMessCallback(void *data);
-    	static void    	accelMessCallback(void *data);
-    	static void    	infoMessCallback(void *data);
+            static void			floatResolutionMessCallback(void *data, float resolution);
+            static void			floatVideoModeMessCallback(void *data, float videomode);
+            static void			floatDepthModeMessCallback(void *data, float depthmode);
+            static void    	floatAngleMessCallback(void *data, float angle);
+            static void    	floatLedMessCallback(void *data, float led);
+            static void    	bangMessCallback(void *data);
+            static void    	accelMessCallback(void *data);
+            static void    	infoMessCallback(void *data);
 
-    	static void    	floatRgbMessCallback(void *data, float rgb);
-    	static void    	floatDepthMessCallback(void *data, float depth);
-    	
-    	static void    	floatDepthOutputMessCallback(void *data, float depth_output);
-    	
-    	static void    	renderDepthCallback(void *data, t_symbol*s, int argc, t_atom*argv);
-    	
-			pthread_t freenect_thread;
- 
-			t_outlet        *m_infooutlet;
-			t_outlet        *m_depthoutlet; 
-			t_inlet         *m_depthinlet; 
+            static void    	floatRgbMessCallback(void *data, float rgb);
+            static void    	floatDepthMessCallback(void *data, float depth);
+            
+            static void    	floatDepthOutputMessCallback(void *data, float depth_output);
+            
+            static void    	renderDepthCallback(void *data, t_symbol*s, int argc, t_atom*argv);
+            static void     openMessCallback(void *data, t_symbol*s, int argc, t_atom*argv);
+            static void     enumerateMessCallback(void *data);
+            
+            pthread_t freenect_thread;
+     
+            t_outlet        *m_infooutlet;
+            t_outlet        *m_depthoutlet; 
+            t_inlet         *m_depthinlet; 
+            
+            std::vector<kinect_device> kinect_devices;
 };
 
 #endif	// for header file

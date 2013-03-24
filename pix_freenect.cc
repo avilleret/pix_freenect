@@ -18,6 +18,7 @@
 // -----------------------
 //	pix_freenect
 //	2011/12 by Matthias Kronlachner
+//  2013 by Antoine Villeret : add initialisation routines to avoid bogus object under Linux
 // -----------------------
 
 #include "pix_freenect.h"
@@ -43,32 +44,60 @@ freenect_device *f_dev;
 // 1: kinect_id/serial, rgb_on, depth_on
 pix_freenect :: pix_freenect(int argc, t_atom *argv)
 { 
-	post("pix_freenect 0.10 - 2011/12 by Matthias Kronlachner");
-  rgb_width=640;
-  rgb_height=480;
-  depth_width=640;
-  depth_height=480;
-  x_angle = 0;
-  x_led = 1;
+	post("pix_freenect 0.10 - 2011/12 by Matthias Kronlachner - 2013 : A Villeret");
+    
+    
+    m_depthoutlet = outlet_new(this->x_obj, 0);
+    m_infooutlet  = outlet_new(this->x_obj, 0);
+    m_depthinlet  = inlet_new(this->x_obj, &this->x_obj->ob_pd, gensym("gem_state"), gensym("depth_state"));
+    
+    rgb_width=640;
+    rgb_height=480;
+    depth_width=640;
+    depth_height=480;
+    x_angle = 0;
+    x_led = 1;
   
 	int rgb_on = 0;
 	int depth_on = 0;
 	int kinect_dev_nr = 0;
 	t_symbol *serial;
-	bool openBySerial=false;
+    serial=NULL;
+    
+    //~ pointer initialisation
+    f_ctx=NULL;
+    f_dev=NULL;
+    
+    freenect_thread=0;
+    
+    rgb_started=false;
+    depth_started=false;
+    
+    depth_mid = (uint16_t*)malloc(640*480*sizeof(uint16_t));
+    depth_front = (uint16_t*)malloc(640*480*sizeof(uint16_t));
+    rgb_back = (uint8_t*)malloc(1280*1024*3*sizeof(uint8_t));
+    rgb_mid = (uint8_t*)malloc(1280*1024*3*sizeof(uint8_t));
+    rgb_front = (uint8_t*)malloc(1280*1024*4*sizeof(uint8_t));
+
+    got_rgb = 0;
+    got_depth = 0;
 	
+	rgb_started = 0;
+	depth_started = 0;
+	
+	depth_output = 0;
+	req_depth_output = 0;
+
+	rgb_reallocate = false;
+	destroy_thread = false;
+    
 	if (argc >= 1)
 	{
-		const char* test = "float";
-		serial = atom_getsymbol(&argv[0]);
-		
-		if (!strncmp(serial->s_name,"float", 5))
-		{
+        if ( argv[0].a_type == A_FLOAT ){
 			kinect_dev_nr = (int)atom_getint(&argv[0]);
-			openBySerial=false;
 		} else {
 			//post ("test: %s", (char*)serial->s_name);
-			openBySerial=true;
+            serial = atom_getsymbol(&argv[0]);
 		}
 	}
 	if (argc >= 2)
@@ -85,102 +114,31 @@ pix_freenect :: pix_freenect(int argc, t_atom *argv)
 			depth_on = 1;
 		}
 	}
-	
-
+    
+    printf("arg parsed OK\n");
   
-  if (freenect_init(&f_ctx, NULL) < 0) {
-		throw(GemException("freenect_init() failed\n"));
-  }else{
-  	//post("freenect initiated\n");
-  }
+    if (freenect_init(&f_ctx, NULL) < 0) {
+        printf("can't initialize libfreenect\n");
+        throw(GemException("freenect_init() failed\n"));
+    }else{
+        verbose(1,"libfreenect initiated\n");
+        printf("libfreenect initialized\n");
+    }
 
 	freenect_set_log_level(f_ctx, FREENECT_LOG_ERROR); // LOG LEVEL
 	freenect_select_subdevices(f_ctx, (freenect_device_flags)(FREENECT_DEVICE_MOTOR | FREENECT_DEVICE_CAMERA));
-	
-	
-  //int nr_devices = freenect_num_devices (f_ctx);
-  freenect_device_attributes * devAttrib;
-	int nr_devices =freenect_list_device_attributes(f_ctx, &devAttrib);
-  post ("Number of devices found: %d", nr_devices);
 
-	// display serial numbers
-	const char* id;
-	for(int i = 0; i < nr_devices; i++){
-		id = devAttrib->camera_serial;
-		devAttrib = devAttrib->next;
-		post ("Device %d serial: %s", i, id);
-	}
-	
-	// OPEN KINECT BY ID
-	if (!openBySerial)
-	{
-	verbose(1, "trying to open Kinect device nr %i...", (int)kinect_dev_nr);
-  if (freenect_open_device(f_ctx, &f_dev, kinect_dev_nr) < 0) {
-  	throw(GemException("Could not open device! \n"));
-  } else
-		post("Kinect Nr %d opened", kinect_dev_nr);
-	}
-	
-	// OPEN KINECT BY SERIAL
-	if (openBySerial)
-	{
-	post("trying to open Kinect with serial %s...", (char*)serial->s_name);
-  if (freenect_open_device_by_camera_serial(f_ctx, &f_dev, (char*)serial->s_name) < 0) {
-  	throw(GemException("Could not open device! \n"));
-  } else
-		post("Kinect with serial %s opened!", (char*)serial->s_name);
-	}
-	// SET USER DATA FOR CALLBACKS
-  freenect_set_user(f_dev, this);
-	
-	
-	int res = pthread_create(&freenect_thread, NULL, freenect_thread_func, this);
-	if (res) {
-		throw(GemException("pthread_create failed\n"));
-	}
-	
+    enumerateMess(); //~ get all connected Kinect
 
- //create mutex  
-  gl_backbuf_mutex = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
-  if(gl_backbuf_mutex){
-    if ( pthread_mutex_init(gl_backbuf_mutex, NULL) < 0 ) {
-      free(gl_backbuf_mutex);
-      gl_backbuf_mutex=NULL;
-    } 
-  }
-
-  gl_frame_cond = (pthread_cond_t*) malloc(sizeof(pthread_cond_t));
-  pthread_cond_init(gl_frame_cond, NULL);
-	
-	// STARTUP FREENECT MODES
-  rgb_format = FREENECT_VIDEO_RGB;
-  req_rgb_format = FREENECT_VIDEO_RGB; //FREENECT_VIDEO_RGB
-	depth_format = FREENECT_DEPTH_MM;
-	req_depth_format= FREENECT_DEPTH_MM; //FREENECT_DEPTH_11BIT
-
-	freenect_res = FREENECT_RESOLUTION_MEDIUM;
-	req_freenect_res = FREENECT_RESOLUTION_MEDIUM;
-	
-  depth_mid = (uint16_t*)malloc(640*480*2);
-  depth_front = (uint16_t*)malloc(640*480*2);
-
-  rgb_back = (uint8_t*)malloc(1280*1024*3);
-  rgb_mid = (uint8_t*)malloc(1280*1024*3);
-  rgb_front = (uint8_t*)malloc(1280*1024*4);
-
-  got_rgb = 0;
-  got_depth = 0;
-	
-	rgb_started = 0;
-	depth_started = 0;
-	
-	depth_output = 0;
-	req_depth_output = 0;
-
-	rgb_reallocate = false;
-	
-	destroy_thread = false;
-	
+	if ( kinect_devices.size() > 0 ){
+        if (!serial) // OPEN KINECT BY ID
+        {
+            openById(kinect_dev_nr);
+        } else { // OPEN KINECT BY SERIAL
+            openBySerial(serial);
+        }
+    }
+    
 	if (rgb_on)
 	{
 		rgb_wanted = true;
@@ -194,15 +152,9 @@ pix_freenect :: pix_freenect(int argc, t_atom *argv)
 	} else {
 		depth_wanted = false;
 	}
-	
-  
-  m_depthoutlet = outlet_new(this->x_obj, 0);
-  
-  m_infooutlet  = outlet_new(this->x_obj, 0);
-  
-	m_depthinlet  = inlet_new(this->x_obj, &this->x_obj->ob_pd, gensym("gem_state"), gensym("depth_state"));
  
-  m_rendering = false;
+    m_rendering = false;
+    printf("constructor end\n");
 }
 
 
@@ -293,14 +245,15 @@ void *pix_freenect::freenect_thread_func(void*target)
 
 bool pix_freenect::startRGB()
 {
+    if (!f_dev) return false;
 	int res;
 	res = freenect_start_video(f_dev);
-  sleep(1);
+    //~ sleep(1);
 	if (res == 0)
 	{
 		post ("RGB started");
 		rgb_started=true;
-		freenect_update_tilt_state(f_dev); // trick to wake up thread
+		//~ freenect_update_tilt_state(f_dev); // trick to wake up thread
 		return true;
 		
 	} else {
@@ -327,13 +280,14 @@ bool pix_freenect::stopRGB()
 
 bool pix_freenect::startDepth()
 {
+    if (!f_dev) return false;
 	int res;
 	res = freenect_start_depth(f_dev);
-    sleep(1); // wait 1s for depth stream to start streaming - delays startup but is necessary!!
+    //~ sleep(1); // wait 1s for depth stream to start streaming - delays startup but is necessary!!
 	if (res == 0)
 	{
 		post ("Depth started");
-		freenect_update_tilt_state(f_dev); // trick to wake up thread
+		//~ freenect_update_tilt_state(f_dev); // trick to wake up thread
 		depth_started=true;
 		return true;
 
@@ -365,22 +319,18 @@ void pix_freenect::depth_cb(freenect_device *dev, void *v_depth, uint32_t timest
 	int i;
 	uint16_t *depth = (uint16_t*)v_depth;
 
-	pthread_mutex_lock(me->gl_backbuf_mutex);
 
 	for (i=0; i<640*480; i++) {		
 		me->depth_mid[i] = depth[i];
 	}
 
 	me->got_depth++;
-	pthread_cond_signal(me->gl_frame_cond);
-	pthread_mutex_unlock(me->gl_backbuf_mutex);
 }
 
 void pix_freenect::rgb_cb(freenect_device *dev, void *rgb, uint32_t timestamp)
 {
 	pix_freenect *me = (pix_freenect*)freenect_get_user(dev);
 
-	pthread_mutex_lock(me->gl_backbuf_mutex);
 
 	// swap buffers
 	//assert (rgb_back == rgb);
@@ -389,8 +339,6 @@ void pix_freenect::rgb_cb(freenect_device *dev, void *rgb, uint32_t timestamp)
 	me->rgb_mid = (uint8_t*)rgb;
 
 	me->got_rgb=1;
-	pthread_cond_signal(me->gl_frame_cond);
-	pthread_mutex_unlock(me->gl_backbuf_mutex);
 }
 
 /////////////////////////////////////////////////////////
@@ -399,12 +347,17 @@ void pix_freenect::rgb_cb(freenect_device *dev, void *rgb, uint32_t timestamp)
 /////////////////////////////////////////////////////////
 pix_freenect :: ~pix_freenect()
 { 
-	freenect_set_led(f_dev,LED_RED );
-	destroy_thread=true;
-
-	pthread_mutex_destroy(gl_backbuf_mutex);
+    printf("pix_freenect destuctor called\n");
+	if (f_dev) freenect_set_led(f_dev,LED_RED );
+    if (freenect_thread){
+        destroy_thread=true; // stop freenect_thread
+        pthread_join(freenect_thread,NULL); // wait until the thread is stopped
+    }
+    printf("thread killed\n");
   
-  pthread_detach(freenect_thread);
+    if (freenect_thread) pthread_detach(freenect_thread);
+    
+
 
   //pthread_exit(&freenect_thread); // it will hang...?
 
@@ -413,18 +366,16 @@ pix_freenect :: ~pix_freenect()
 	if (rgb_started)
 		freenect_stop_video(f_dev);
 	
-	freenect_close_device(f_dev);
-	freenect_shutdown(f_ctx);
+	if (f_dev) freenect_close_device(f_dev);
+	if (f_ctx) freenect_shutdown(f_ctx);
+	if (depth_mid) free(depth_mid);
 	
-
-  
-	free(depth_mid);
-	outlet_free(m_infooutlet);
-  outlet_free(m_depthoutlet);
-  
-  inlet_free(m_depthinlet);
+    outlet_free(m_infooutlet);
+    outlet_free(m_depthoutlet);
+    inlet_free(m_depthinlet);
   
 	post("shutdown kinect nr %i...", kinect_dev_nr);
+    printf("destructor exit ok\n");
 
 }
 
@@ -436,43 +387,51 @@ pix_freenect :: ~pix_freenect()
 
 void pix_freenect :: startRendering(){
 	
-  m_image.image.xsize = rgb_width;
-  m_image.image.ysize = rgb_height;
-  m_image.image.setCsizeByFormat(GL_RGBA);
-  m_image.image.reallocate();
+    printf("startRendering\n");
+    m_image.image.xsize = rgb_width;
+    m_image.image.ysize = rgb_height;
+    m_image.image.setCsizeByFormat(GL_RGBA);
+    m_image.image.reallocate();
   
-  m_depth.image.xsize = depth_width;
-  m_depth.image.ysize = depth_height;
-  if (req_depth_output == 0)
-  {
+    m_depth.image.xsize = depth_width;
+    m_depth.image.ysize = depth_height;
+    if (req_depth_output == 0)
+    {
 		m_depth.image.setCsizeByFormat(GL_RGBA);
 	}
 	if (req_depth_output == 1)
-  {
+    {
 		m_depth.image.setCsizeByFormat(GL_YCBCR_422_GEM);
 	}
 
-  m_depth.image.reallocate();
-  
-  if (rgb_wanted && !rgb_started)
-			{
-				startRGB();
-			}
-			if (!rgb_wanted && rgb_started)
-			{
-				stopRGB();
-			}
+    m_depth.image.reallocate();
+      
+    if (rgb_wanted && !rgb_started)
+    {
+        startRGB();
+    }
+    
+    if (!rgb_wanted && rgb_started)
+    {
+        stopRGB();
+    }
 			
-			if (depth_wanted && !depth_started)
-			{
-				startDepth();
-			}
-			if (!depth_wanted && depth_started)
-			{
-				stopDepth();
-			}
-
-  m_rendering=true;
+    if (depth_wanted && !depth_started)
+    {
+        startDepth();
+    }
+    
+    if (!depth_wanted && depth_started)
+    {
+        stopDepth();
+    }
+    
+    printf("startStream\n");
+    startStream();
+    
+    m_rendering=true;
+    
+    printf("startRendering OK\n");
 }
 
 /////////////////////////////////////////////////////////
@@ -487,87 +446,83 @@ void pix_freenect :: render(GemState *state)
 	if (!m_rendering)
 	{
 		startRendering();
-	} else 	{
+	} 
 
-		if (rgb_reallocate)
-		{
-			switch((int)freenect_res)
-			{
-				case 0: 
-				rgb_width = 320;
-				rgb_height = 240;
-				break;
-				case 1: 
-				rgb_width = 640;
-				rgb_height = 480;
-				break;
-				case 2: 
-				rgb_width = 1280;
-				rgb_height = 1024;
-				break;
-			}
+    if (rgb_reallocate)
+    {
+        switch((int)freenect_res)
+        {
+            case 0: 
+            rgb_width = 320;
+            rgb_height = 240;
+            break;
+            case 1: 
+            rgb_width = 640;
+            rgb_height = 480;
+            break;
+            case 2: 
+            rgb_width = 1280;
+            rgb_height = 1024;
+            break;
+        }
 
-			m_image.image.xsize = rgb_width;
-			m_image.image.ysize = rgb_height;
-			if ((int)req_rgb_format == 0)
-			{
-				m_image.image.setCsizeByFormat(GL_RGBA);
-			}
-			if ((int)req_rgb_format == 2)
-			{
-				m_image.image.setCsizeByFormat(GL_LUMINANCE);
-			}
-			verbose(1, "REALLOCATING....");
-			m_image.image.reallocate();
-			rgb_reallocate = false;
-		}
+        m_image.image.xsize = rgb_width;
+        m_image.image.ysize = rgb_height;
+        if ((int)req_rgb_format == 0)
+        {
+            m_image.image.setCsizeByFormat(GL_RGBA);
+        }
+        if ((int)req_rgb_format == 2)
+        {
+            m_image.image.setCsizeByFormat(GL_LUMINANCE);
+        }
+        verbose(1, "REALLOCATING....");
+        m_image.image.reallocate();
+        rgb_reallocate = false;
+    }
 
-		if (rgb_wanted && rgb_started) //RGB OUTPUT
-		{
-			if (got_rgb) // True if new image
-			{
-        int pixnum = m_image.image.xsize * m_image.image.ysize;
-        
-        uint8_t *tmp;
-        
-        // swap buffer
-        pthread_mutex_lock(gl_backbuf_mutex);
-        tmp = rgb_front;
-        rgb_front = rgb_mid;
-        rgb_mid = tmp;
-        pthread_mutex_unlock(gl_backbuf_mutex);
-        
-        uint8_t *rgb_pixel = rgb_front;
-        unsigned char *pixels=m_image.image.data;
-        
-				if ((int)rgb_format==0)
-				{
-					while (pixnum--) {
+    if (rgb_wanted && rgb_started) //RGB OUTPUT
+    {
+        if (got_rgb) // True if new image
+        {
+            int pixnum = m_image.image.xsize * m_image.image.ysize;
+            
+            uint8_t *tmp;
+            
+            // swap buffer
+            tmp = rgb_front;
+            rgb_front = rgb_mid;
+            rgb_mid = tmp;
+            
+            uint8_t *rgb_pixel = rgb_front;
+            unsigned char *pixels=m_image.image.data;
+    
+            if ((int)rgb_format==0)
+            {
+                while (pixnum--) {
 
-						pixels[chRed]=rgb_pixel[0];
-						pixels[chGreen]=rgb_pixel[1];
-						pixels[chBlue]=rgb_pixel[2];
-						pixels[chAlpha]=255;
+                    pixels[chRed]=rgb_pixel[0];
+                    pixels[chGreen]=rgb_pixel[1];
+                    pixels[chBlue]=rgb_pixel[2];
+                    pixels[chAlpha]=255;
 
-						rgb_pixel+=3;
-						pixels+=4;
-					}
-				} else if ((int)rgb_format==2) { // IR MODE -> greyscale
-					m_image.image.data=rgb_pixel;
-				}
-				
-			m_image.newimage = 1;
-			m_image.image.notowned = true;
-			m_image.image.upsidedown=true;
-			state->set(GemState::_PIX, &m_image);
-			got_rgb=0;
-		} else {
-			m_image.newimage = 0;
-			state->set(GemState::_PIX, &m_image);
-		}
-	}
-
-}
+                    rgb_pixel+=3;
+                    pixels+=4;
+                }
+            } else if ((int)rgb_format==2) { // IR MODE -> greyscale
+                m_image.image.data=rgb_pixel;
+            }
+            
+            m_image.newimage = 1;
+            m_image.image.notowned = true;
+            m_image.image.upsidedown=true;
+            state->set(GemState::_PIX, &m_image);
+            got_rgb=0;
+        } else {
+            m_image.newimage = 0;
+            state->set(GemState::_PIX, &m_image);
+        }
+    }
 }
 
 void pix_freenect :: renderDepth(int argc, t_atom*argv)
@@ -600,13 +555,11 @@ void pix_freenect :: renderDepth(int argc, t_atom*argv)
 
 				if (got_depth)
 				{
-					pthread_mutex_lock(gl_backbuf_mutex);
 					//uint8_t *tmp;
 					//tmp = depth_front;
 					depth_front = depth_mid;
 					//depth_mid = tmp;
 
-					pthread_mutex_unlock(gl_backbuf_mutex);
 
 					if (depth_output == 0) // RAW RGBA
 					{
@@ -676,6 +629,7 @@ void pix_freenect :: postrender(GemState *state)
 ///////////////////////////////////////
 
 void pix_freenect :: stopRendering(){
+    printf("stop rendering, video : %d, depth : %d \n", rgb_started, depth_started);
 	m_rendering=false;
 	
 	if(rgb_started) 
@@ -844,6 +798,107 @@ void pix_freenect :: infoMess ()
 		post ("libfreenect supports FREENECT_DEVICE_AUDIO (%i)", ret);
 	}
 }
+
+void pix_freenect :: enumerateMess(void){
+    verbose(1,"enumerate connected cameras");
+    printf("enumerate connected cameras\n");
+    //int nr_devices = freenect_num_devices (f_ctx);
+    freenect_device_attributes * devAttrib;
+    
+	int nr_devices=0;
+    nr_devices=freenect_list_device_attributes(f_ctx, &devAttrib);
+    post ("Number of devices found: %d", nr_devices);
+
+    t_atom a;
+    SETFLOAT(&a, nr_devices);
+    outlet_anything(m_infooutlet, gensym("devices"), 1, &a);
+
+    kinect_devices.clear();
+    
+    // display serial numbers
+	const char* id;
+	for(int i = 0; i < nr_devices; i++){
+        printf("device %d\n",i);
+        kinect_device dev;
+        dev.id = i;
+        dev.serial = devAttrib->camera_serial;
+		devAttrib = devAttrib->next;
+        kinect_devices.push_back(dev);
+        
+        t_atom ap[3];
+        SETFLOAT(ap,dev.id);
+        SETSYMBOL(ap+1,gensym(dev.serial.c_str()));
+        outlet_anything(m_infooutlet, gensym("device"), 2, ap);
+	}
+    return;
+}
+
+int pix_freenect::openBySerial(t_symbol* serial)
+{
+    verbose(1,"trying to open Kinect with serial %s...", (char*)serial->s_name);
+    printf("trying to open Kinect with serial %s...\n", (char*)serial->s_name);
+    if (freenect_open_device_by_camera_serial(f_ctx, &f_dev, (char*)serial->s_name) < 0) {
+        //~ throw(GemException("Could not open device! \n"));
+        error("Could not open device with serial %s!",serial->s_name);
+        t_atom a;
+        SETFLOAT(&a,0.);
+        outlet_anything(m_infooutlet, gensym("open"), 1, &a);
+        return -1;
+    } else {
+        post("Kinect with serial %s opened!", (char*)serial->s_name);
+        //~ int rtn = startStream();
+        t_atom a;
+        //~ SETFLOAT(&a,(float) (rtn!=0));
+        SETFLOAT(&a,1.);
+        outlet_anything(m_infooutlet, gensym("open"), 1, &a);
+    }
+    return 0;
+}
+
+int pix_freenect::openById(int kinect_dev_nr)
+{
+    verbose(1, "trying to open Kinect device nr %i...", (int)kinect_dev_nr);
+    printf("try to open device with id %d\n",kinect_dev_nr);
+    if (freenect_open_device(f_ctx, &f_dev, kinect_dev_nr) < 0) {
+        //~ throw(GemException("Could not open device! \n"));
+        error("Could not open device nr %d!", kinect_dev_nr);
+        t_atom a;
+        SETFLOAT(&a,0);
+        outlet_anything(m_infooutlet, gensym("open"), 1, &a);
+        return -1;
+    } else {
+        post("Kinect Nr %d opened", kinect_dev_nr);
+        //~ int rtn = startStream();
+        t_atom a;
+        //~ SETFLOAT(&a,(float) (rtn!=0));
+        SETFLOAT(&a,1.);
+        outlet_anything(m_infooutlet, gensym("open"), 1, &a);
+    }
+    return 0;
+}
+
+int pix_freenect::startStream()
+{
+    if (!f_dev) return -1;
+    // SET USER DATA FOR CALLBACKS
+    freenect_set_user(f_dev, this);
+	
+    // STARTUP FREENECT MODES
+    rgb_format = FREENECT_VIDEO_RGB;
+    req_rgb_format = FREENECT_VIDEO_RGB; //FREENECT_VIDEO_RGB
+	depth_format = FREENECT_DEPTH_MM;
+	req_depth_format= FREENECT_DEPTH_MM; //FREENECT_DEPTH_11BIT
+
+	freenect_res = FREENECT_RESOLUTION_MEDIUM;
+	req_freenect_res = FREENECT_RESOLUTION_MEDIUM;
+	
+	int res = pthread_create(&freenect_thread, NULL, freenect_thread_func, this);
+	if (res) {
+		throw(GemException("pthread_create failed\n"));
+	}
+
+    return 0;
+}
 /////////////////////////////////////////////////////////
 // static member function
 //
@@ -852,34 +907,33 @@ void pix_freenect :: obj_setupCallback(t_class *classPtr)
 {
 	class_addmethod(classPtr, (t_method)&pix_freenect::floatResolutionMessCallback,
   		  gensym("resolution"), A_FLOAT, A_NULL);
-  class_addmethod(classPtr, (t_method)&pix_freenect::floatVideoModeMessCallback,
+    class_addmethod(classPtr, (t_method)&pix_freenect::floatVideoModeMessCallback,
   		  gensym("video_mode"), A_FLOAT, A_NULL);
-  class_addmethod(classPtr, (t_method)&pix_freenect::floatDepthModeMessCallback,
+    class_addmethod(classPtr, (t_method)&pix_freenect::floatDepthModeMessCallback,
   		  gensym("depth_mode"), A_FLOAT, A_NULL);
-  class_addmethod(classPtr, (t_method)&pix_freenect::floatAngleMessCallback,
+    class_addmethod(classPtr, (t_method)&pix_freenect::floatAngleMessCallback,
   		  gensym("angle"), A_FLOAT, A_NULL);
-  class_addmethod(classPtr, (t_method)&pix_freenect::floatLedMessCallback,
+    class_addmethod(classPtr, (t_method)&pix_freenect::floatLedMessCallback,
   		  gensym("led"), A_FLOAT, A_NULL);
-  class_addmethod(classPtr, (t_method)&pix_freenect::bangMessCallback,
+    class_addmethod(classPtr, (t_method)&pix_freenect::bangMessCallback,
   		  gensym("bang"), A_NULL);
-  class_addmethod(classPtr, (t_method)&pix_freenect::accelMessCallback,
+    class_addmethod(classPtr, (t_method)&pix_freenect::accelMessCallback,
   		  gensym("accel"), A_NULL);
-
-  class_addmethod(classPtr, (t_method)&pix_freenect::floatRgbMessCallback,
+    class_addmethod(classPtr, (t_method)&pix_freenect::floatRgbMessCallback,
   		  gensym("rgb"), A_FLOAT, A_NULL);
-  class_addmethod(classPtr, (t_method)&pix_freenect::floatDepthMessCallback,
+    class_addmethod(classPtr, (t_method)&pix_freenect::floatDepthMessCallback,
   		  gensym("depth"), A_FLOAT, A_NULL);
-  
-  class_addmethod(classPtr, (t_method)&pix_freenect::floatDepthOutputMessCallback,
+    class_addmethod(classPtr, (t_method)&pix_freenect::floatDepthOutputMessCallback,
   		  gensym("depth_output"), A_FLOAT, A_NULL);
-  		  
-  		   		  
-  class_addmethod(classPtr, (t_method)(&pix_freenect::renderDepthCallback),
-                  gensym("depth_state"), A_GIMME, A_NULL);
- 
+    class_addmethod(classPtr, (t_method)(&pix_freenect::renderDepthCallback),
+          gensym("depth_state"), A_GIMME, A_NULL);
 	class_addmethod(classPtr, (t_method)(&pix_freenect::infoMessCallback),
-									gensym("info"), A_NULL);
- }
+          gensym("info"), A_NULL);
+	class_addmethod(classPtr, (t_method)(&pix_freenect::openMessCallback),
+          gensym("open"), A_GIMME, A_NULL);
+	class_addmethod(classPtr, (t_method)(&pix_freenect::enumerateMessCallback),
+          gensym("enumerate"), A_NULL);
+}
 
 void pix_freenect :: floatResolutionMessCallback(void *data, t_floatarg resolution)
 {
@@ -924,7 +978,7 @@ void pix_freenect :: floatRgbMessCallback(void *data, t_floatarg rgb)
   if ((int)rgb == 1)
 	{
 		me->rgb_wanted=true;
-		freenect_update_tilt_state(me->f_dev); // trick to wake up thread
+		//~ freenect_update_tilt_state(me->f_dev); // trick to wake up thread //~ AV : crash if no device is opened
 	}
 		
 }
@@ -938,7 +992,7 @@ void pix_freenect :: floatDepthMessCallback(void *data, t_floatarg depth)
   if ((int)depth == 1)
 	{
 		me->depth_wanted=true;
-		freenect_update_tilt_state(me->f_dev); // trick to wake up thread
+		//~ freenect_update_tilt_state(me->f_dev); // trick to wake up thread //~ AV : crash if no device is opened
 	}
 }
 
@@ -958,4 +1012,26 @@ void pix_freenect :: renderDepthCallback(void *data, t_symbol*s, int argc, t_ato
 void pix_freenect :: infoMessCallback(void *data)
 {
   GetMyClass(data)->infoMess();
+}
+
+void pix_freenect :: openMessCallback(void *data, t_symbol*s, int argc, t_atom*argv)
+{
+    if ( argc != 1 )
+    {
+        GetMyClass(data)->error("open message need float (id) or symbol (serial) arg");
+    } else {
+        if ( argv[0].a_type == A_FLOAT ){
+            GetMyClass(data)->openById(argv[0].a_w.w_float);
+        } else if ( argv[0].a_type == A_SYMBOL )
+        {
+            GetMyClass(data)->openBySerial(argv[0].a_w.w_symbol);
+        } else {
+            GetMyClass(data)->error("open message need float (id) or symbol (serial) arg");
+        }
+    }
+}
+
+void pix_freenect :: enumerateMessCallback(void *data)
+{
+  GetMyClass(data)->enumerateMess();
 }
