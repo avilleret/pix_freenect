@@ -392,6 +392,7 @@ pix_freenect :: ~pix_freenect()
 
 void pix_freenect :: startRendering(){
 	
+    m_rendering=true;
     printf("startRendering\n");
     m_image.image.xsize = rgb_width;
     m_image.image.ysize = rgb_height;
@@ -433,8 +434,6 @@ void pix_freenect :: startRendering(){
     
     startStream();
     
-    m_rendering=true;
-    
     printf("startRendering OK\n");
 }
 
@@ -449,7 +448,7 @@ void pix_freenect :: render(GemState *state)
 {
 	if (!m_rendering)
 	{
-		startRendering();
+		//~ startRendering();
 	} 
 
     if (rgb_reallocate)
@@ -535,9 +534,10 @@ void pix_freenect :: render(GemState *state)
 
 void pix_freenect :: renderDepth(int argc, t_atom*argv)
 {
+    printf("render depth\n");
 	if (!m_rendering)
 	{
-		startRendering();
+		//~ startRendering();
 	} else 	{
 
 		if (argc==2 && argv->a_type==A_POINTER && (argv+1)->a_type==A_POINTER) // is it gem_state?
