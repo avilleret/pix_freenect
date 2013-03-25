@@ -210,8 +210,11 @@ void *pix_freenect::freenect_thread_func(void*target)
 				{
 					me->stopRGB();
 				}
-				freenect_set_video_mode(me->f_dev, freenect_find_video_mode(me->req_freenect_res, me->req_rgb_format));
-				if (me->rgb_started)
+                int rtn = freenect_set_video_mode(me->f_dev, freenect_find_video_mode(me->req_freenect_res, me->req_rgb_format));
+				if(rtn!=0){
+                    me->error("could not set rgb mode, error : %d",rtn);
+                }
+				if (me->rgb_wanted) // don't start if don't wanted
 				{
 					me->startRGB();
 				}
@@ -227,8 +230,11 @@ void *pix_freenect::freenect_thread_func(void*target)
 					me->stopDepth();
 					//freenect_stop_depth(me->f_dev);
 				}
-				freenect_set_depth_mode(me->f_dev, freenect_find_depth_mode(FREENECT_RESOLUTION_MEDIUM, me->req_depth_format)); // just medium resolution available
-				if (me->depth_started)
+				int rtn = freenect_set_depth_mode(me->f_dev, freenect_find_depth_mode(FREENECT_RESOLUTION_MEDIUM, me->req_depth_format)); // just medium resolution available
+                if (rtn!=0){
+                    me->error("could nor set depth mode, error : %d", rtn);
+                }
+				if (me->depth_wanted) // don't start if don't wanted
 				{
 					me->startDepth();
 					//freenect_start_depth(me->f_dev);
@@ -238,7 +244,7 @@ void *pix_freenect::freenect_thread_func(void*target)
 		}
 	//me->post ("thread end");	
 	}
-  me->post ("freenect thread killed");
+    me->post ("freenect thread killed");
 	return 0;
 }
 
@@ -342,7 +348,7 @@ void pix_freenect::depth_cb(freenect_device *dev, void *v_depth, uint32_t timest
 	}
     */
     
-    memcpy(me->depth_mid, depth, 640*480*sizeof(uint16_t));
+    memcpy(me->depth_mid, depth, 640*480*sizeof(uint16_t)); //~ AV : faster version
 
 	me->got_depth++;
 }
