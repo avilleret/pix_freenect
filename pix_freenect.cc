@@ -163,12 +163,12 @@ void *pix_freenect::freenect_thread_func(void*target)
 {
 	pix_freenect *me = (pix_freenect*) target;
 
-	freenect_set_led(me->f_dev,LED_BLINK_GREEN );
-	freenect_set_depth_callback(me->f_dev, me->depth_cb);
-	freenect_set_video_callback(me->f_dev, me->rgb_cb);
-	freenect_set_video_mode(me->f_dev, freenect_find_video_mode(me->freenect_res, me->rgb_format));
-	freenect_set_depth_mode(me->f_dev, freenect_find_depth_mode(FREENECT_RESOLUTION_MEDIUM, me->depth_format));
-	freenect_set_video_buffer(me->f_dev, me->rgb_back);
+	//~ freenect_set_led(me->f_dev,LED_BLINK_GREEN );
+	//~ freenect_set_depth_callback(me->f_dev, me->depth_cb);
+	//~ freenect_set_video_callback(me->f_dev, me->rgb_cb);
+	//~ freenect_set_video_mode(me->f_dev, freenect_find_video_mode(me->freenect_res, me->rgb_format));
+	//~ freenect_set_depth_mode(me->f_dev, freenect_find_depth_mode(FREENECT_RESOLUTION_MEDIUM, me->depth_format));
+	//~ freenect_set_video_buffer(me->f_dev, me->rgb_back);
   //freenect_set_depth_buffer(me->f_dev, depth_back);
   
 	int accelCount = 0;
@@ -184,7 +184,8 @@ void *pix_freenect::freenect_thread_func(void*target)
     	status = freenect_process_events_timeout(me->f_ctx,&timeout);
     
 		// Start/Stop Streams if user changed request or started Rendering
-		if (me->m_rendering)
+		//~ if (me->m_rendering)
+		if (0)
 		{
 			if (me->rgb_wanted && !me->rgb_started)
 			{
@@ -245,6 +246,7 @@ void *pix_freenect::freenect_thread_func(void*target)
 
 bool pix_freenect::startRGB()
 {
+    printf("startRGB\n");
     if (!f_dev) return false;
 	int res;
 	res = freenect_start_video(f_dev);
@@ -260,6 +262,7 @@ bool pix_freenect::startRGB()
 		post ("Could not start RGB - error code: %i", res);
 		return false;
 	}
+    printf("startRGB end OK\n");
 }
 
 bool pix_freenect::stopRGB()
@@ -319,10 +322,13 @@ void pix_freenect::depth_cb(freenect_device *dev, void *v_depth, uint32_t timest
 	int i;
 	uint16_t *depth = (uint16_t*)v_depth;
 
-
+    /*
 	for (i=0; i<640*480; i++) {		
 		me->depth_mid[i] = depth[i];
 	}
+    */
+    
+    memcpy(me->depth_mid, depth, 640*480*sizeof(uint16_t));
 
 	me->got_depth++;
 }
@@ -330,7 +336,6 @@ void pix_freenect::depth_cb(freenect_device *dev, void *v_depth, uint32_t timest
 void pix_freenect::rgb_cb(freenect_device *dev, void *rgb, uint32_t timestamp)
 {
 	pix_freenect *me = (pix_freenect*)freenect_get_user(dev);
-
 
 	// swap buffers
 	//assert (rgb_back == rgb);
@@ -426,7 +431,6 @@ void pix_freenect :: startRendering(){
         stopDepth();
     }
     
-    printf("startStream\n");
     startStream();
     
     m_rendering=true;
@@ -499,6 +503,7 @@ void pix_freenect :: render(GemState *state)
     
             if ((int)rgb_format==0)
             {
+                /*
                 while (pixnum--) {
 
                     pixels[chRed]=rgb_pixel[0];
@@ -509,6 +514,9 @@ void pix_freenect :: render(GemState *state)
                     rgb_pixel+=3;
                     pixels+=4;
                 }
+                */
+                m_image.image.fromRGB(rgb_pixel); //~ AV uses acceleration if available
+                
             } else if ((int)rgb_format==2) { // IR MODE -> greyscale
                 m_image.image.data=rgb_pixel;
             }
@@ -636,6 +644,13 @@ void pix_freenect :: stopRendering(){
 		stopRGB();
 	if(depth_started)
 		stopDepth();
+    
+    //~ if (freenect_thread){
+        //~ destroy_thread=true; // stop freenect_thread
+        //~ pthread_join(freenect_thread,NULL); // wait until the thread is stopped
+    //~ }
+    //~ if (freenect_thread) pthread_detach(freenect_thread);
+    //~ freenect_thread=NULL;
 
 }
 
@@ -879,6 +894,7 @@ int pix_freenect::openById(int kinect_dev_nr)
 
 int pix_freenect::startStream()
 {
+    printf("startStream\n");
     if (!f_dev) return -1;
     // SET USER DATA FOR CALLBACKS
     freenect_set_user(f_dev, this);
@@ -891,12 +907,24 @@ int pix_freenect::startStream()
 
 	freenect_res = FREENECT_RESOLUTION_MEDIUM;
 	req_freenect_res = FREENECT_RESOLUTION_MEDIUM;
+    
+    // from freenect_thread_fnt
+    freenect_set_led(f_dev,LED_BLINK_GREEN );
+	freenect_set_depth_callback(f_dev, depth_cb);
+	freenect_set_video_callback(f_dev, rgb_cb);
+	freenect_set_video_mode(f_dev, freenect_find_video_mode(freenect_res, rgb_format));
+	freenect_set_depth_mode(f_dev, freenect_find_depth_mode(FREENECT_RESOLUTION_MEDIUM, depth_format));
+	freenect_set_video_buffer(f_dev, rgb_back);
+    
+    freenect_start_video(f_dev);
+    freenect_start_depth(f_dev);
 	
 	int res = pthread_create(&freenect_thread, NULL, freenect_thread_func, this);
 	if (res) {
 		throw(GemException("pthread_create failed\n"));
 	}
 
+    printf("startStream OK\n");
     return 0;
 }
 /////////////////////////////////////////////////////////
@@ -973,25 +1001,55 @@ void pix_freenect :: accelMessCallback(void *data)
 void pix_freenect :: floatRgbMessCallback(void *data, t_floatarg rgb)
 {
   pix_freenect *me = (pix_freenect*)GetMyClass(data);
-  if ((int)rgb == 0)
+  if ((int)rgb == 0){
 		me->rgb_wanted=false;
-  if ((int)rgb == 1)
+        if (me->f_dev){
+            if(freenect_stop_video(me->f_dev) == 0){
+                me->post("RGB stream stoped");
+                t_atom a;
+                SETFLOAT(&a,0.);
+                outlet_anything(me->m_infooutlet, gensym("rgb"), 1, &a);
+            }
+        }
+    }
+  else
 	{
 		me->rgb_wanted=true;
-		//~ freenect_update_tilt_state(me->f_dev); // trick to wake up thread //~ AV : crash if no device is opened
+        if (me->f_dev){
+           if(freenect_start_video(me->f_dev) == 0){
+                me->post("RGB stream started");
+                t_atom a;
+                SETFLOAT(&a,1.);
+                outlet_anything(me->m_infooutlet, gensym("rgb"), 1, &a);
+            }
+        }
 	}
-		
 }
 
 void pix_freenect :: floatDepthMessCallback(void *data, t_floatarg depth)
 {
   pix_freenect *me = (pix_freenect*)GetMyClass(data);
   //me->post("daa %i", (int)depth);
-  if ((int)depth == 0)
+  if ((int)depth == 0){
 		me->depth_wanted=false;
-  if ((int)depth == 1)
-	{
+        if (me->f_dev){
+            if(freenect_stop_depth(me->f_dev) == 0){
+                me->post("depth stream stoped");
+                t_atom a;
+                SETFLOAT(&a,0.);
+                outlet_anything(me->m_infooutlet, gensym("depth"), 1, &a);
+            }
+        }
+    } else {
 		me->depth_wanted=true;
+        if (me->f_dev){
+            if(freenect_start_depth(me->f_dev) == 0){
+                me->post("depth stream started");
+                t_atom a;
+                SETFLOAT(&a,1.);
+                outlet_anything(me->m_infooutlet, gensym("depth"), 1, &a);
+            }
+        }
 		//~ freenect_update_tilt_state(me->f_dev); // trick to wake up thread //~ AV : crash if no device is opened
 	}
 }
