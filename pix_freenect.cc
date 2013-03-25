@@ -178,14 +178,12 @@ void *pix_freenect::freenect_thread_func(void*target)
   struct timeval timeout;
   timeout.tv_sec = 2;
   
-  while (!me->destroy_thread) {
+  while (!me->destroy_thread && freenect_process_events_timeout(me->f_ctx,&timeout)==0 ) {
 	//me->post ("thread start");
-		//status = freenect_process_events(me->f_ctx);
-    	status = freenect_process_events_timeout(me->f_ctx,&timeout);
-    
-		// Start/Stop Streams if user changed request or started Rendering
-		//~ if (me->m_rendering)
-		if (0)
+    	//~ status = freenect_process_events_timeout(me->f_ctx,&timeout);
+		
+        // Start/Stop Streams if user changed request or started Rendering
+		if (me->m_rendering)
 		{
 			if (me->rgb_wanted && !me->rgb_started)
 			{
@@ -251,17 +249,24 @@ bool pix_freenect::startRGB()
 	int res;
 	res = freenect_start_video(f_dev);
     //~ sleep(1);
+        
 	if (res == 0)
 	{
 		post ("RGB started");
 		rgb_started=true;
-		//~ freenect_update_tilt_state(f_dev); // trick to wake up thread
+		//~ freenect_update_tilt_state(f_dev); // trick to wake up thread //~ AV: why ? is it only OS X ?
 		return true;
 		
 	} else {
 		post ("Could not start RGB - error code: %i", res);
+        t_atom a;
+        SETFLOAT(&a,0.);
+        outlet_anything(m_infooutlet, gensym("rgb"), 1, &a);
 		return false;
 	}
+    t_atom a;
+    SETFLOAT(&a,(float)rgb_started);
+    outlet_anything(m_infooutlet, gensym("rgb"), 1, &a);
     printf("startRGB end OK\n");
 }
 
@@ -279,6 +284,9 @@ bool pix_freenect::stopRGB()
 		post ("Could not stop RGB - error code: %i", res);
 		return false;
 	}
+    t_atom a;
+    SETFLOAT(&a,(float)rgb_started);
+    outlet_anything(m_infooutlet, gensym("rgb"), 1, &a);
 }
 
 bool pix_freenect::startDepth()
@@ -286,11 +294,11 @@ bool pix_freenect::startDepth()
     if (!f_dev) return false;
 	int res;
 	res = freenect_start_depth(f_dev);
-    //~ sleep(1); // wait 1s for depth stream to start streaming - delays startup but is necessary!!
+    //~ sleep(1); // wait 1s for depth stream to start streaming - delays startup but is necessary!! //~ AV why ? for sure, it's not on Linux
 	if (res == 0)
 	{
 		post ("Depth started");
-		//~ freenect_update_tilt_state(f_dev); // trick to wake up thread
+		//~ freenect_update_tilt_state(f_dev); // trick to wake up thread //~ AV: why ? is it only OS X ?
 		depth_started=true;
 		return true;
 
@@ -298,6 +306,9 @@ bool pix_freenect::startDepth()
 		post ("Could not start Depth - error code: %i", res);
 		return false;
 	}
+    t_atom a;
+    SETFLOAT(&a,(float)depth_started);
+    outlet_anything(m_infooutlet, gensym("depth"), 1, &a);
 }
 
 bool pix_freenect::stopDepth()
@@ -313,6 +324,9 @@ bool pix_freenect::stopDepth()
 		post ("Could not stop Depth - error code: %i", res);
 		return false;
 	}
+    t_atom a;
+    SETFLOAT(&a,(float)depth_started);
+    outlet_anything(m_infooutlet, gensym("depth"), 1, &a);
 }
 
 void pix_freenect::depth_cb(freenect_device *dev, void *v_depth, uint32_t timestamp)
@@ -356,7 +370,7 @@ pix_freenect :: ~pix_freenect()
 	if (f_dev) freenect_set_led(f_dev,LED_RED );
     if (freenect_thread){
         destroy_thread=true; // stop freenect_thread
-        pthread_join(freenect_thread,NULL); // wait until the thread is stopped
+        pthread_join(freenect_thread,NULL); // wait until the thread exit
     }
     printf("thread killed\n");
   
@@ -391,9 +405,10 @@ pix_freenect :: ~pix_freenect()
 /////////////////////////////////////////////////////////
 
 void pix_freenect :: startRendering(){
-	
+    
+    if (m_rendering) return;
+    
     m_rendering=true;
-    printf("startRendering\n");
     m_image.image.xsize = rgb_width;
     m_image.image.ysize = rgb_height;
     m_image.image.setCsizeByFormat(GL_RGBA);
@@ -446,10 +461,11 @@ void pix_freenect :: startRendering(){
 	
 void pix_freenect :: render(GemState *state)
 {
-	if (!m_rendering)
-	{
+    // AV : startRendering() is automatically called by Gem
+	//~ if (!m_rendering)
+	//~ {
 		//~ startRendering();
-	} 
+	//~ } 
 
     if (rgb_reallocate)
     {
@@ -533,11 +549,10 @@ void pix_freenect :: render(GemState *state)
 }
 
 void pix_freenect :: renderDepth(int argc, t_atom*argv)
-{
-    printf("render depth\n");
+{    
 	if (!m_rendering)
 	{
-		//~ startRendering();
+		startRendering();
 	} else 	{
 
 		if (argc==2 && argv->a_type==A_POINTER && (argv+1)->a_type==A_POINTER) // is it gem_state?
@@ -645,12 +660,14 @@ void pix_freenect :: stopRendering(){
 	if(depth_started)
 		stopDepth();
     
-    //~ if (freenect_thread){
-        //~ destroy_thread=true; // stop freenect_thread
-        //~ pthread_join(freenect_thread,NULL); // wait until the thread is stopped
-    //~ }
-    //~ if (freenect_thread) pthread_detach(freenect_thread);
-    //~ freenect_thread=NULL;
+    if (freenect_thread){
+        printf("stop freenect thread\n");
+        destroy_thread=true; // stop freenect_thread
+        pthread_join(freenect_thread,NULL); // wait until the thread is stopped
+    }
+    if (freenect_thread) pthread_detach(freenect_thread);
+    freenect_thread=0;
+    printf("stop rendering ok\n");
 
 }
 
@@ -916,9 +933,10 @@ int pix_freenect::startStream()
 	freenect_set_depth_mode(f_dev, freenect_find_depth_mode(FREENECT_RESOLUTION_MEDIUM, depth_format));
 	freenect_set_video_buffer(f_dev, rgb_back);
     
-    freenect_start_video(f_dev);
-    freenect_start_depth(f_dev);
+    if (rgb_wanted) freenect_start_video(f_dev);
+    if (depth_wanted) freenect_start_depth(f_dev);
 	
+    destroy_thread=false;
 	int res = pthread_create(&freenect_thread, NULL, freenect_thread_func, this);
 	if (res) {
 		throw(GemException("pthread_create failed\n"));
@@ -1001,57 +1019,59 @@ void pix_freenect :: accelMessCallback(void *data)
 void pix_freenect :: floatRgbMessCallback(void *data, t_floatarg rgb)
 {
   pix_freenect *me = (pix_freenect*)GetMyClass(data);
-  if ((int)rgb == 0){
-		me->rgb_wanted=false;
-        if (me->f_dev){
-            if(freenect_stop_video(me->f_dev) == 0){
-                me->post("RGB stream stoped");
-                t_atom a;
-                SETFLOAT(&a,0.);
-                outlet_anything(me->m_infooutlet, gensym("rgb"), 1, &a);
-            }
-        }
-    }
-  else
-	{
-		me->rgb_wanted=true;
-        if (me->f_dev){
-           if(freenect_start_video(me->f_dev) == 0){
-                me->post("RGB stream started");
-                t_atom a;
-                SETFLOAT(&a,1.);
-                outlet_anything(me->m_infooutlet, gensym("rgb"), 1, &a);
-            }
-        }
-	}
+  //~ if ((int)rgb == 0){
+		//~ me->rgb_wanted=false;
+        //~ if (me->f_dev){
+            //~ if(freenect_stop_video(me->f_dev) == 0){
+                //~ me->post("RGB stream stoped");
+                //~ t_atom a;
+                //~ SETFLOAT(&a,0.);
+                //~ outlet_anything(me->m_infooutlet, gensym("rgb"), 1, &a);
+            //~ }
+        //~ }
+    //~ }
+  //~ else
+	//~ {
+		//~ me->rgb_wanted=true;
+        //~ if (me->f_dev){
+           //~ if(freenect_start_video(me->f_dev) == 0){
+                //~ me->post("RGB stream started");
+                //~ t_atom a;
+                //~ SETFLOAT(&a,1.);
+                //~ outlet_anything(me->m_infooutlet, gensym("rgb"), 1, &a);
+            //~ }
+        //~ }
+	//~ }
+    me->rgb_wanted=(int)rgb!=0;
 }
 
 void pix_freenect :: floatDepthMessCallback(void *data, t_floatarg depth)
 {
   pix_freenect *me = (pix_freenect*)GetMyClass(data);
   //me->post("daa %i", (int)depth);
-  if ((int)depth == 0){
-		me->depth_wanted=false;
-        if (me->f_dev){
-            if(freenect_stop_depth(me->f_dev) == 0){
-                me->post("depth stream stoped");
-                t_atom a;
-                SETFLOAT(&a,0.);
-                outlet_anything(me->m_infooutlet, gensym("depth"), 1, &a);
-            }
-        }
-    } else {
-		me->depth_wanted=true;
-        if (me->f_dev){
-            if(freenect_start_depth(me->f_dev) == 0){
-                me->post("depth stream started");
-                t_atom a;
-                SETFLOAT(&a,1.);
-                outlet_anything(me->m_infooutlet, gensym("depth"), 1, &a);
-            }
-        }
+  //~ if ((int)depth == 0){
+		//~ me->depth_wanted=false;
+        //~ if (me->f_dev){
+            //~ if(freenect_stop_depth(me->f_dev) == 0){
+                //~ me->post("depth stream stoped");
+                //~ t_atom a;
+                //~ SETFLOAT(&a,0.);
+                //~ outlet_anything(me->m_infooutlet, gensym("depth"), 1, &a);
+            //~ }
+        //~ }
+    //~ } else {
+		//~ me->depth_wanted=true;
+        //~ if (me->f_dev){
+            //~ if(freenect_start_depth(me->f_dev) == 0){
+                //~ me->post("depth stream started");
+                //~ t_atom a;
+                //~ SETFLOAT(&a,1.);
+                //~ outlet_anything(me->m_infooutlet, gensym("depth"), 1, &a);
+            //~ }
+        //~ }
 		//~ freenect_update_tilt_state(me->f_dev); // trick to wake up thread //~ AV : crash if no device is opened
-	}
+	//~ }
+    me->depth_wanted=(int)depth!=0;
 }
 
 

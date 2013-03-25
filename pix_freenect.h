@@ -82,6 +82,7 @@ class GEM_EXTERN pix_freenect : public GemBase
             virtual ~pix_freenect();
 
 			virtual void	startRendering();
+            
     	//////////
     	// Rendering 	
 			virtual void 	render(GemState *state);
