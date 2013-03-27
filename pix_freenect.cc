@@ -760,7 +760,8 @@ void pix_freenect :: floatAngleMess (float angle)
 void pix_freenect :: floatLedMess (float led)
 {
 	//post("LED %f", led);
-
+  if(!f_dev) return;
+  
   if ( ( (int)led>=0 ) && ( (int)led<=5 ) ) x_led = (int)led;
   	if (x_led == 1) {
 		freenect_set_led(f_dev,LED_GREEN);
