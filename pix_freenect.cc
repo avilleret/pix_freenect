@@ -687,6 +687,10 @@ void pix_freenect :: stopRendering(){
 
 void pix_freenect :: floatResolutionMess (float resolution)
 {
+    if(!f_dev){
+        error("open a device before trying to set resolution");
+        return;
+    }
 	if ( ( (int)resolution>=0 ) && ( (int)resolution<=2 ) )
 	{
 		req_freenect_res = (freenect_resolution)(int)resolution;
@@ -706,6 +710,10 @@ void pix_freenect :: floatResolutionMess (float resolution)
 
 void pix_freenect :: floatVideoModeMess (float videomode)
 {
+    if(!f_dev){
+        error("open a device before trying to set video mode");
+        return;
+    }
 	if ( ( (int)videomode>=0 ) && ( (int)videomode<=1 ) ) 
 	{
 		if ((int)videomode==0) {
@@ -724,6 +732,10 @@ void pix_freenect :: floatVideoModeMess (float videomode)
 
 void pix_freenect :: floatDepthModeMess (float depthmode)
 {
+    if(!f_dev){
+        error("open a device before trying to set depth mode");
+        return;
+    }
 	if ( ( (int)depthmode>=0 ) && ( (int)depthmode<=2 ) ) 
 	{
 		if ((int)depthmode==0)
@@ -750,6 +762,10 @@ void pix_freenect :: floatDepthModeMess (float depthmode)
 
 void pix_freenect :: floatAngleMess (float angle)
 {
+    if(!f_dev){
+        error("open a device before trying to set tilt angle");
+        return;
+    }
   x_angle = (int)angle;
   if ( angle<-30.0 ) x_angle = -30;
   if ( angle>30.0 ) x_angle = 30;
@@ -760,8 +776,10 @@ void pix_freenect :: floatAngleMess (float angle)
 void pix_freenect :: floatLedMess (float led)
 {
 	//post("LED %f", led);
-  if(!f_dev) return;
-  
+    if(!f_dev){
+        error("open a device before trying to set LED status");
+        return;
+    }  
   if ( ( (int)led>=0 ) && ( (int)led<=5 ) ) x_led = (int)led;
   	if (x_led == 1) {
 		freenect_set_led(f_dev,LED_GREEN);
@@ -785,6 +803,10 @@ void pix_freenect :: floatLedMess (float led)
 
 void pix_freenect :: accelMess ()
 {
+    if(!f_dev){
+        error("open a device before trying to get acceleration data");
+        return;
+    }
 	freenect_raw_tilt_state* state;
 	freenect_update_tilt_state(f_dev);
 	state = freenect_get_tilt_state(f_dev);
