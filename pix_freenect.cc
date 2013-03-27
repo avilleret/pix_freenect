@@ -255,44 +255,44 @@ bool pix_freenect::startRGB()
 	int res;
 	res = freenect_start_video(f_dev);
     //~ sleep(1);
+    bool rtn=true;
         
 	if (res == 0)
 	{
 		post ("RGB started");
 		rgb_started=true;
 		//~ freenect_update_tilt_state(f_dev); // trick to wake up thread //~ AV: why ? is it only OS X ?
-		return true;
+		rtn = true;
 		
 	} else {
 		post ("Could not start RGB - error code: %i", res);
-        t_atom a;
-        SETFLOAT(&a,0.);
-        outlet_anything(m_infooutlet, gensym("rgb"), 1, &a);
-		return false;
+		rtn=false;
 	}
     t_atom a;
     SETFLOAT(&a,(float)rgb_started);
     outlet_anything(m_infooutlet, gensym("rgb"), 1, &a);
-    printf("startRGB end OK\n");
+    return rtn;
 }
 
 bool pix_freenect::stopRGB()
 {
 	int res;
 	res = freenect_stop_video(f_dev);
+    bool rtn=true;
 	if (res == 0)
 	{
 		post ("RGB stoped");
 		rgb_started=false;
-		return true;
+		rtn=true;
 
 	} else {
 		post ("Could not stop RGB - error code: %i", res);
-		return false;
+		rtn=false;
 	}
     t_atom a;
     SETFLOAT(&a,(float)rgb_started);
     outlet_anything(m_infooutlet, gensym("rgb"), 1, &a);
+    return rtn;
 }
 
 bool pix_freenect::startDepth()
@@ -300,39 +300,43 @@ bool pix_freenect::startDepth()
     if (!f_dev) return false;
 	int res;
 	res = freenect_start_depth(f_dev);
+    bool rtn=true;
     //~ sleep(1); // wait 1s for depth stream to start streaming - delays startup but is necessary!! //~ AV why ? for sure, it's not on Linux
 	if (res == 0)
 	{
 		post ("Depth started");
 		//~ freenect_update_tilt_state(f_dev); // trick to wake up thread //~ AV: why ? is it only OS X ?
 		depth_started=true;
-		return true;
+		rtn=true;
 
 	} else {
 		post ("Could not start Depth - error code: %i", res);
-		return false;
+		rtn=false;
 	}
     t_atom a;
     SETFLOAT(&a,(float)depth_started);
     outlet_anything(m_infooutlet, gensym("depth"), 1, &a);
+    return rtn;
 }
 
 bool pix_freenect::stopDepth()
 {
 	int res;
 	res = freenect_stop_depth(f_dev);
+    bool rtn=true;
 	if (res == 0)
 	{
 		post ("Depth stoped");
 		depth_started=false;
-		return true;
+		rtn=true;
 	} else {
 		post ("Could not stop Depth - error code: %i", res);
-		return false;
+		rtn=false;
 	}
     t_atom a;
     SETFLOAT(&a,(float)depth_started);
     outlet_anything(m_infooutlet, gensym("depth"), 1, &a);
+    return rtn;
 }
 
 void pix_freenect::depth_cb(freenect_device *dev, void *v_depth, uint32_t timestamp)
