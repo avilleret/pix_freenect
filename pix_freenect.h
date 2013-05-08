@@ -106,6 +106,7 @@ class GEM_EXTERN pix_freenect : public GemBase
             void            enumerateMess(void);
             int             openBySerial(t_symbol* serial);
             int             openById(int id);
+            void             closeMess(void);
             int             startStream();
 
 			void			renderDepth(int argc, t_atom*argv);
@@ -138,6 +139,7 @@ class GEM_EXTERN pix_freenect : public GemBase
 			int got_depth;
 
 			bool destroy_thread; // shutdown...
+                  bool thread_started;
 			        
             uint16_t t_gamma[10000];
             uint16_t t_gamma2[10000];
@@ -200,6 +202,7 @@ class GEM_EXTERN pix_freenect : public GemBase
             
             static void    	renderDepthCallback(void *data, t_symbol*s, int argc, t_atom*argv);
             static void     openMessCallback(void *data, t_symbol*s, int argc, t_atom*argv);
+            static void     closeMessCallback(void *data);
             static void     enumerateMessCallback(void *data);
             
             pthread_t freenect_thread;
@@ -209,6 +212,8 @@ class GEM_EXTERN pix_freenect : public GemBase
             t_inlet         *m_depthinlet; 
             
             std::vector<kinect_device> kinect_devices;
+            
+            int createThread(void);
 };
 
 #endif	// for header file

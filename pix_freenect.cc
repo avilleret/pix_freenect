@@ -44,8 +44,7 @@ freenect_device *f_dev;
 // 1: kinect_id/serial, rgb_on, depth_on
 pix_freenect :: pix_freenect(int argc, t_atom *argv)
 { 
-	post("pix_freenect 0.10 - 2011/12 by Matthias Kronlachner - 2013 : A Villeret");
-    
+	post("pix_freenect 0.12 - 2011/12 by Matthias Kronlachner - 2013 : A Villeret");
     
     m_depthoutlet = outlet_new(this->x_obj, 0);
     m_infooutlet  = outlet_new(this->x_obj, 0);
@@ -114,9 +113,8 @@ pix_freenect :: pix_freenect(int argc, t_atom *argv)
 			depth_on = 1;
 		}
 	}
-    
-    printf("arg parsed OK\n");
-  
+    m_rendering = false;
+
     if (freenect_init(&f_ctx, NULL) < 0) {
         printf("can't initialize libfreenect\n");
         throw(GemException("freenect_init() failed\n"));
@@ -129,7 +127,6 @@ pix_freenect :: pix_freenect(int argc, t_atom *argv)
 	freenect_select_subdevices(f_ctx, (freenect_device_flags)(FREENECT_DEVICE_MOTOR | FREENECT_DEVICE_CAMERA));
 
     enumerateMess(); //~ get all connected Kinect
-
 	if ( kinect_devices.size() > 0 ){
         if (!serial) // OPEN KINECT BY ID
         {
@@ -153,8 +150,7 @@ pix_freenect :: pix_freenect(int argc, t_atom *argv)
 		depth_wanted = false;
 	}
  
-    m_rendering = false;
-    printf("constructor end\n");
+  
 }
 
 
@@ -178,10 +174,12 @@ void *pix_freenect::freenect_thread_func(void*target)
   struct timeval timeout;
   timeout.tv_sec = 2;
   
+  printf("start while loop\n");
+  
   while (!me->destroy_thread && freenect_process_events_timeout(me->f_ctx,&timeout)==0 ) {
 	//me->post ("thread start");
     	//~ status = freenect_process_events_timeout(me->f_ctx,&timeout);
-		
+
         // Start/Stop Streams if user changed request or started Rendering
 		if (me->m_rendering)
 		{
@@ -244,6 +242,14 @@ void *pix_freenect::freenect_thread_func(void*target)
 		}
 	//me->post ("thread end");	
 	}
+    printf("thread while loop exits\n");
+    
+    if (me->rgb_started)
+        me->stopRGB();
+        
+    if (me->depth_started)
+        me->stopDepth();
+
     me->post ("freenect thread killed");
 	return 0;
 }
@@ -266,6 +272,7 @@ bool pix_freenect::startRGB()
 		
 	} else {
 		post ("Could not start RGB - error code: %i", res);
+        rgb_started=true; // it appears that freenect_start_video returns an error while it does start the stream ...
 		rtn=false;
 	}
     t_atom a;
@@ -276,17 +283,20 @@ bool pix_freenect::startRGB()
 
 bool pix_freenect::stopRGB()
 {
+    printf("stop RGB\n");
 	int res;
 	res = freenect_stop_video(f_dev);
     bool rtn=true;
 	if (res == 0)
 	{
 		post ("RGB stoped");
+        printf("RGB stoped \n");
 		rgb_started=false;
 		rtn=true;
 
 	} else {
 		post ("Could not stop RGB - error code: %i", res);
+        printf("error while trying to stop RGB\n");
 		rtn=false;
 	}
     t_atom a;
@@ -297,6 +307,7 @@ bool pix_freenect::stopRGB()
 
 bool pix_freenect::startDepth()
 {
+    printf("start DEPTH\n");
     if (!f_dev) return false;
 	int res;
 	res = freenect_start_depth(f_dev);
@@ -311,6 +322,7 @@ bool pix_freenect::startDepth()
 
 	} else {
 		post ("Could not start Depth - error code: %i", res);
+        depth_started=true; // it appears that freenect_start_depth returns an error while it does start the stream ...
 		rtn=false;
 	}
     t_atom a;
@@ -321,16 +333,19 @@ bool pix_freenect::startDepth()
 
 bool pix_freenect::stopDepth()
 {
+    printf("stop DEPTH\n");
 	int res;
 	res = freenect_stop_depth(f_dev);
     bool rtn=true;
 	if (res == 0)
 	{
 		post ("Depth stoped");
+		printf ("Depth stoped\n");
 		depth_started=false;
 		rtn=true;
 	} else {
 		post ("Could not stop Depth - error code: %i", res);
+        printf("error while trying to stop depth\n");
 		rtn=false;
 	}
     t_atom a;
@@ -475,7 +490,8 @@ void pix_freenect :: render(GemState *state)
 	//~ if (!m_rendering)
 	//~ {
 		//~ startRendering();
-	//~ } 
+	//~ }
+    if (!freenect_thread) return;
 
     if (rgb_reallocate)
     {
@@ -560,6 +576,8 @@ void pix_freenect :: render(GemState *state)
 
 void pix_freenect :: renderDepth(int argc, t_atom*argv)
 {    
+    if (!freenect_thread) return;
+    
 	if (!m_rendering)
 	{
 		startRendering();
@@ -864,6 +882,33 @@ void pix_freenect :: infoMess ()
 	}
 }
 
+void pix_freenect :: closeMess(void){
+    
+    if (!f_dev)
+        return;
+    if (freenect_thread){
+        printf("end thread\n");
+        destroy_thread=true; // stop freenect_thread
+        pthread_join(freenect_thread,NULL); // wait until the thread exit
+        destroy_thread=false;
+    }
+  
+    if (freenect_thread) pthread_detach(freenect_thread);
+    freenect_thread= (pthread_t) NULL;
+
+    printf("close device\n");
+    int rtn = freenect_close_device(f_dev);
+    f_dev = NULL;
+    
+    t_atom a;
+    SETFLOAT(&a, rtn);
+    outlet_anything(m_infooutlet, gensym("close_error"), 1, &a);
+    if ( rtn != 0 ){
+        error("pix_freenect : can't close device !");
+    }
+    return;
+}
+
 void pix_freenect :: enumerateMess(void){
     verbose(1,"enumerate connected cameras");
     printf("enumerate connected cameras\n");
@@ -900,13 +945,21 @@ void pix_freenect :: enumerateMess(void){
 
 int pix_freenect::openBySerial(t_symbol* serial)
 {
+    if (f_dev){
+        error("please close before open");
+        t_atom a;
+        SETFLOAT(&a,-1);
+        outlet_anything(m_infooutlet, gensym("open"), 1, &a);
+        return -1;
+    }
     verbose(1,"trying to open Kinect with serial %s...", (char*)serial->s_name);
     printf("trying to open Kinect with serial %s...\n", (char*)serial->s_name);
+    
     if (freenect_open_device_by_camera_serial(f_ctx, &f_dev, (char*)serial->s_name) < 0) {
         //~ throw(GemException("Could not open device! \n"));
         error("Could not open device with serial %s!",serial->s_name);
         t_atom a;
-        SETFLOAT(&a,0.);
+        SETFLOAT(&a,-1);
         outlet_anything(m_infooutlet, gensym("open"), 1, &a);
         return -1;
     } else {
@@ -914,21 +967,32 @@ int pix_freenect::openBySerial(t_symbol* serial)
         //~ int rtn = startStream();
         t_atom a;
         //~ SETFLOAT(&a,(float) (rtn!=0));
-        SETFLOAT(&a,1.);
+        SETSYMBOL(&a,serial);
         outlet_anything(m_infooutlet, gensym("open"), 1, &a);
     }
+    
+    if (m_rendering)
+            startStream();
     return 0;
 }
 
 int pix_freenect::openById(int kinect_dev_nr)
 {
+    if (f_dev){
+        error("please close before open");
+        t_atom a;
+        SETFLOAT(&a,-1);
+        outlet_anything(m_infooutlet, gensym("open"), 1, &a);
+        return -1;
+    }
     verbose(1, "trying to open Kinect device nr %i...", (int)kinect_dev_nr);
     printf("try to open device with id %d\n",kinect_dev_nr);
+   
     if (freenect_open_device(f_ctx, &f_dev, kinect_dev_nr) < 0) {
         //~ throw(GemException("Could not open device! \n"));
         error("Could not open device nr %d!", kinect_dev_nr);
         t_atom a;
-        SETFLOAT(&a,0);
+        SETFLOAT(&a,-1);
         outlet_anything(m_infooutlet, gensym("open"), 1, &a);
         return -1;
     } else {
@@ -936,9 +1000,11 @@ int pix_freenect::openById(int kinect_dev_nr)
         //~ int rtn = startStream();
         t_atom a;
         //~ SETFLOAT(&a,(float) (rtn!=0));
-        SETFLOAT(&a,1.);
+        SETFLOAT(&a,kinect_dev_nr);
         outlet_anything(m_infooutlet, gensym("open"), 1, &a);
     }
+    if (m_rendering)
+            startStream();
     return 0;
 }
 
@@ -959,24 +1025,35 @@ int pix_freenect::startStream()
 	req_freenect_res = FREENECT_RESOLUTION_MEDIUM;
     
     // from freenect_thread_fnt
-    freenect_set_led(f_dev,LED_BLINK_GREEN );
+    int rtn=0;
+    rtn += freenect_set_led(f_dev,LED_BLINK_GREEN );
 	freenect_set_depth_callback(f_dev, depth_cb);
 	freenect_set_video_callback(f_dev, rgb_cb);
-	freenect_set_video_mode(f_dev, freenect_find_video_mode(freenect_res, rgb_format));
-	freenect_set_depth_mode(f_dev, freenect_find_depth_mode(FREENECT_RESOLUTION_MEDIUM, depth_format));
-	freenect_set_video_buffer(f_dev, rgb_back);
+	rtn += freenect_set_video_mode(f_dev, freenect_find_video_mode(freenect_res, rgb_format));
+	rtn += freenect_set_depth_mode(f_dev, freenect_find_depth_mode(FREENECT_RESOLUTION_MEDIUM, depth_format));
+	rtn += freenect_set_video_buffer(f_dev, rgb_back);
+    printf("rtn : %d\n",rtn);
     
     if (rgb_wanted) freenect_start_video(f_dev);
     if (depth_wanted) freenect_start_depth(f_dev);
-	
+    
+    if (createThread() != 0 ) throw(GemException("pthread_create failed\n"));
+    
+    return 0;
+}
+
+int pix_freenect :: createThread(void){
+    printf("create thread...");
     destroy_thread=false;
 	int res = pthread_create(&freenect_thread, NULL, freenect_thread_func, this);
 	if (res) {
-		throw(GemException("pthread_create failed\n"));
-	}
-
-    printf("startStream OK\n");
-    return 0;
+        printf("error %x : can't create thread\n", res);
+		return -1;
+	} else {
+        printf("OK\n");
+        thread_started = true;
+        return 0;
+    }
 }
 /////////////////////////////////////////////////////////
 // static member function
@@ -1010,6 +1087,8 @@ void pix_freenect :: obj_setupCallback(t_class *classPtr)
           gensym("info"), A_NULL);
 	class_addmethod(classPtr, (t_method)(&pix_freenect::openMessCallback),
           gensym("open"), A_GIMME, A_NULL);
+	class_addmethod(classPtr, (t_method)(&pix_freenect::closeMessCallback),
+          gensym("close"), A_NULL);
 	class_addmethod(classPtr, (t_method)(&pix_freenect::enumerateMessCallback),
           gensym("enumerate"), A_NULL);
 }
@@ -1140,6 +1219,11 @@ void pix_freenect :: openMessCallback(void *data, t_symbol*s, int argc, t_atom*a
             GetMyClass(data)->error("open message need float (id) or symbol (serial) arg");
         }
     }
+}
+
+void pix_freenect :: closeMessCallback(void *data)
+{
+    GetMyClass(data)->closeMess();
 }
 
 void pix_freenect :: enumerateMessCallback(void *data)
