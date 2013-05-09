@@ -45,7 +45,7 @@ freenect_device *f_dev;
 pix_freenect :: pix_freenect(int argc, t_atom *argv)
 { 
 	post("pix_freenect 0.12 - 2011/12 by Matthias Kronlachner - 2013 : A Villeret");
-    
+    post("build on %s at %s", __DATE__, __TIME__);
     m_depthoutlet = outlet_new(this->x_obj, 0);
     m_infooutlet  = outlet_new(this->x_obj, 0);
     m_depthinlet  = inlet_new(this->x_obj, &this->x_obj->ob_pd, gensym("gem_state"), gensym("depth_state"));
@@ -575,13 +575,13 @@ void pix_freenect :: render(GemState *state)
 }
 
 void pix_freenect :: renderDepth(int argc, t_atom*argv)
-{    
-    if (!freenect_thread) return;
-    
+{        
 	if (!m_rendering)
 	{
 		startRendering();
 	} else 	{
+        
+        if (!freenect_thread) return;
 
 		if (argc==2 && argv->a_type==A_POINTER && (argv+1)->a_type==A_POINTER) // is it gem_state?
 		{
