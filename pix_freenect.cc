@@ -1,4 +1,4 @@
-	////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////
 //
 // GEM - Graphics Environment for Multimedia
 //
@@ -358,8 +358,8 @@ void pix_freenect::depth_cb(freenect_device *dev, void *v_depth, uint32_t timest
 {
 	pix_freenect *me = (pix_freenect*)freenect_get_user(dev);
 	
-	int i;
-	uint16_t *depth = (uint16_t*)v_depth;
+	//~ int i;
+	//~ uint16_t *depth = (uint16_t*)v_depth;
 
     /*
 	for (i=0; i<640*480; i++) {		
@@ -367,9 +367,9 @@ void pix_freenect::depth_cb(freenect_device *dev, void *v_depth, uint32_t timest
 	}
     */
     
-    memcpy(me->depth_mid, depth, 640*480*sizeof(uint16_t)); //~ AV : faster version
+    memcpy(me->depth_mid, (uint16_t*)v_depth, 640*480*sizeof(uint16_t)); //~ AV : faster version
 
-	me->got_depth++;
+	me->got_depth=1;
 }
 
 void pix_freenect::rgb_cb(freenect_device *dev, void *rgb, uint32_t timestamp)
@@ -451,26 +451,6 @@ void pix_freenect :: startRendering(){
 	}
 
     m_depth.image.reallocate();
-      
-    if (rgb_wanted && !rgb_started)
-    {
-        startRGB();
-    }
-    
-    if (!rgb_wanted && rgb_started)
-    {
-        stopRGB();
-    }
-			
-    if (depth_wanted && !depth_started)
-    {
-        startDepth();
-    }
-    
-    if (!depth_wanted && depth_started)
-    {
-        stopDepth();
-    }
     
     startStream();
     
@@ -529,9 +509,7 @@ void pix_freenect :: render(GemState *state)
     if (rgb_wanted && rgb_started) //RGB OUTPUT
     {
         if (got_rgb) // True if new image
-        {
-            int pixnum = m_image.image.xsize * m_image.image.ysize;
-            
+        {            
             uint8_t *tmp;
             
             // swap buffer
@@ -544,18 +522,6 @@ void pix_freenect :: render(GemState *state)
     
             if ((int)rgb_format==0)
             {
-                /*
-                while (pixnum--) {
-
-                    pixels[chRed]=rgb_pixel[0];
-                    pixels[chGreen]=rgb_pixel[1];
-                    pixels[chBlue]=rgb_pixel[2];
-                    pixels[chAlpha]=255;
-
-                    rgb_pixel+=3;
-                    pixels+=4;
-                }
-                */
                 m_image.image.fromRGB(rgb_pixel); //~ AV uses acceleration if available
                 
             } else if ((int)rgb_format==2) { // IR MODE -> greyscale
@@ -660,7 +626,9 @@ void pix_freenect :: renderDepth(int argc, t_atom*argv)
 				}
 			}
 
-		}
+		} else {
+            outlet_anything(m_depthoutlet, gensym("gem_state"), argc, argv); // if we don't get a gemstate pointer, we forward all to other objects...
+        }
 	}
 }
 	
@@ -1018,21 +986,20 @@ int pix_freenect::startStream()
     // STARTUP FREENECT MODES
     rgb_format = FREENECT_VIDEO_RGB;
     req_rgb_format = FREENECT_VIDEO_RGB; //FREENECT_VIDEO_RGB
-	depth_format = FREENECT_DEPTH_MM;
-	req_depth_format= FREENECT_DEPTH_MM; //FREENECT_DEPTH_11BIT
+	depth_format = FREENECT_DEPTH_REGISTERED;
+	req_depth_format= FREENECT_DEPTH_REGISTERED;
 
 	freenect_res = FREENECT_RESOLUTION_MEDIUM;
 	req_freenect_res = FREENECT_RESOLUTION_MEDIUM;
     
     // from freenect_thread_fnt
-    int rtn=0;
-    rtn += freenect_set_led(f_dev,LED_BLINK_GREEN );
+    freenect_set_led(f_dev,LED_BLINK_GREEN );
 	freenect_set_depth_callback(f_dev, depth_cb);
 	freenect_set_video_callback(f_dev, rgb_cb);
-	rtn += freenect_set_video_mode(f_dev, freenect_find_video_mode(freenect_res, rgb_format));
-	rtn += freenect_set_depth_mode(f_dev, freenect_find_depth_mode(FREENECT_RESOLUTION_MEDIUM, depth_format));
-	rtn += freenect_set_video_buffer(f_dev, rgb_back);
-    printf("rtn : %d\n",rtn);
+	freenect_set_video_mode(f_dev, freenect_find_video_mode(freenect_res, rgb_format));
+	freenect_set_depth_mode(f_dev, freenect_find_depth_mode(FREENECT_RESOLUTION_MEDIUM, depth_format));
+	freenect_set_video_buffer(f_dev, rgb_back);
+
     
     if (rgb_wanted) freenect_start_video(f_dev);
     if (depth_wanted) freenect_start_depth(f_dev);
